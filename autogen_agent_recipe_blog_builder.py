@@ -18,6 +18,7 @@ from autogen_ext.tools.code_execution import PythonCodeExecutionTool
 from agents.software_engineer import create_software_engineer_agent
 from agents.planner import create_planner_agent
 from agents.meal_nutrition import create_meal_nutrition_agent
+import time
 
 # Set the event loop policy before anything else
 if os.name == "nt":  # Windows
@@ -214,17 +215,38 @@ async def main() -> None:
         
         print_section("TASK EXECUTION", "Creating the recipe blog post")
         console.print(Panel(Markdown(task), title="Task Definition", border_style="cyan"))
-
-        # loop until the user exits        
+        
         while task.lower() != "exit":
             
+            start_time = time.time()
+            result=None
             # Use a try-except block for the stream processing
-            try:
+            try:                    
                 async for message in team.run_stream(task=task):
-                    await process_message(message)
+                    result = await process_message(message)
             except Exception as e:
                 console.print(f"[bold red]Error in message processing:[/bold red] {str(e)}")
                 console.print_exception()
+                
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            console.print(f"[bold]Execution time:[/bold] {elapsed_time:.2f} seconds")
+            
+            # Print total token usage metrics
+            #2025-02-27 - The GPT-4o model, priced at $2.50 per 1 million input tokens and $10.00 per 1 million output tokens.            
+            token_cost_per_input = 2.50 / 1_000_000
+            token_cost_per_output = 10.00 / 1_000_000
+
+            output_tokens = model_client.actual_usage().completion_tokens
+            input_tokens = model_client.actual_usage().prompt_tokens
+            total_output_cost = output_tokens * token_cost_per_output
+            total_input_cost = input_tokens * token_cost_per_input
+            total_cost = total_input_cost + total_output_cost
+            console.print(f"[bold]Total input tokens used (cumulative):[/bold] {input_tokens}")
+            console.print(f"[bold]Total output tokens used (cumulative):[/bold] {output_tokens}")
+            console.print(f"[bold]Total input cost (cumulative)($USD):[/bold] ${total_input_cost}")
+            console.print(f"[bold]Total output cost (cumulative)($USD):[/bold] ${total_output_cost}")
+            console.print(f"[bold]Total session cost (cumulative)($USD):[/bold] ${total_cost}")
             
             print_section("EXECUTION COMPLETED", "All required files have been created and verified.")
                 
