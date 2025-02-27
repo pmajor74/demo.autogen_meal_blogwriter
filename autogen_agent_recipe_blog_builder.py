@@ -229,7 +229,7 @@ async def main() -> None:
             print_section("EXECUTION COMPLETED", "All required files have been created and verified.")
                 
             # stop and wait to see if the user wants to interact further
-            task = input("User Instructions (type 'exit' to end session and open the html file): ")
+            task = input("User Instructions (type 'exit' to end session): ")
 
     except Exception as e:
         console.print(f"[bold red]Error in main execution:[/bold red] {str(e)}")
