@@ -1,0 +1,11 @@
+autogen-agentchat
+autogen-ext[openai]
+asyncio
+nest_asyncio
+python-dotenv
+tiktoken
+aiofiles
+azure-core
+datetime
+requests
+rich
