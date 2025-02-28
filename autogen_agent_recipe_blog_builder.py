@@ -219,17 +219,16 @@ async def main() -> None:
         while task.lower() != "exit":
             
             start_time = time.time()
-            result=None
-            # Use a try-except block for the stream processing
             try:                    
                 async for message in team.run_stream(task=task):
-                    result = await process_message(message)
+                    await process_message(message)
             except Exception as e:
                 console.print(f"[bold red]Error in message processing:[/bold red] {str(e)}")
                 console.print_exception()
                 
             end_time = time.time()
-            elapsed_time = end_time - start_time
+            elapsed_time = (end_time - start_time)/60
+            print("\n\n##########################################################################################\n\n")
             console.print(f"[bold]Execution time:[/bold] {elapsed_time:.2f} seconds")
             
             # Print total token usage metrics
