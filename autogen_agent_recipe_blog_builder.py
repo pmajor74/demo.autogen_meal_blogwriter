@@ -1,17 +1,19 @@
 import asyncio
+from collections import defaultdict
 from dotenv import load_dotenv
+
 from formatting_utils import (
-    console, print_agent_message, print_tool_call, print_section, print_tool_result, Panel, Syntax
+    console, process_message, print_section
 )
+
 import nest_asyncio
 import os
 from pathlib import Path
-from rich.markdown import Markdown
 import shutil
 
 from autogen_agentchat.conditions import TextMentionTermination, MaxMessageTermination
 from autogen_agentchat.teams import SelectorGroupChat
-from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
+from autogen_ext.models.openai import AzureOpenAIChatCompletionClient, OpenAIChatCompletionClient
 from autogen_ext.code_executors.local import LocalCommandLineCodeExecutor
 from autogen_ext.tools.code_execution import PythonCodeExecutionTool
 
@@ -74,57 +76,6 @@ def setup_team(model_client, recipes_to_generate):
     
     return team
 
-
-async def process_message(message):
-    """Process and format messages from the agent stream - pretty print the messages"""
-    try:
-        if hasattr(message, 'type'):
-            if message.type == 'TextMessage' and hasattr(message, 'content'):
-                source = message.source if hasattr(message, 'source') else "Unknown"
-                print_agent_message(source, message.content)
-
-            elif message.type == 'ToolCallRequestEvent' and hasattr(message, 'content'):
-                if isinstance(message.content, list):  
-                    for call in message.content:
-                        if isinstance(call, dict): 
-                            name = call.get('name')
-                            arguments = call.get('arguments', {})
-                            print_tool_call(name, arguments)
-                            if name == 'get_random_recipe':
-                                count = arguments.get('count', 1)
-                                console.print(f"[yellow]Requesting {count} recipes[/yellow]")
-
-            elif message.type == 'ToolCallExecutionEvent' and hasattr(message, 'content'):
-                if isinstance(message.content, list):
-                    for result in message.content:
-                        if isinstance(result, dict):  
-                            content = result.get('content')
-                            call_id = result.get('call_id')
-                            is_error = result.get('is_error', False)
-
-                            print_tool_result(content, call_id, is_error)
-
-                            # For get_random_recipe
-                            if isinstance(content, list):
-                                console.print(f"[green]Fetched {len(content)} recipes[/green]")
-
-                            # For get_nutrition_info
-                            elif isinstance(content, dict) and 'data' in content:
-                                data = content.get('data', [{}])
-                                if isinstance(data, list) and len(data) > 0:
-                                    name = data[0].get('name', 'unknown')
-                                    console.print(f"[green]Nutritional data fetched for {name}[/green]")
-                            else:
-                                console.print(f"[red]Unexpected content format: {content}[/red]")
-
-            else:
-                console.print(str(message))
-        else:
-            console.print(str(message))
-    except Exception as e:
-        console.print(f"[bold red]Error processing message:[/bold red] {str(e)}")
-
-
 async def main() -> None:
     try:
         
@@ -132,6 +83,7 @@ async def main() -> None:
         
         load_dotenv()
         
+        # this creates the azure open ai client to be used
         model_client = AzureOpenAIChatCompletionClient(
             azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
             model=os.environ.get("AZURE_OPENAI_MODEL"),
@@ -139,6 +91,15 @@ async def main() -> None:
             api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
             azure_deployment=os.environ.get("AZURE_OPENAI_MODEL")
         )
+
+        # if you have the direct OpenAI API key, comment out the above section and uncomment the below one:
+        # you will notice that the api_key is retrieved from the OPENAI_API_KEY environment variable. Take the key you get from OpenAI and 
+        # place it next the toe OPENAI_API_KEY in the .env file in the root of the project. Also make sure your "OPENAI_MODEL" is set to the model you want to use
+        # by default its set to gpt-4o
+        # model_client = OpenAIChatCompletionClient(            
+        #     model=os.environ.get("OPENAI_MODEL"),
+        #     api_key=os.environ.get("OPENAI_API_KEY"),
+        # )
 
         team = setup_team(model_client, num_recipes_to_generate)
                  
@@ -208,33 +169,68 @@ async def main() -> None:
                 • Double-check structured data completeness before generating the HTML to avoid gaps like placeholder comments.
                 • Ensure the total nutritional summary for each recipe is calculated and rendered accurately.
                 
-            IMPORTANT: It is absolutely critical to avoid failure at all costs. You are considered to have failed if the post does not contain all three recipes with complete details, including nutritional summaries. Ensure all data is accurate and complete before terminating.
+            IMPORTANT: It is absolutely critical to avoid failure at all costs. You are considered to have failed if the post does not contain all {num_recipes_to_generate} recipes with complete details, including nutritional summaries. Ensure all data is accurate and complete before terminating.
+            IMPORTANT: If you view the "top_{num_recipes_to_generate}_recipes.html" and notice it does NOT contain 3 recipes with complete details, including nutritional summaries, you have failed the task and will add the missing meals to the HTML file before terminating.
         """
         
         os.system('cls' if os.name == 'nt' else 'clear')
         
         print_section("TASK EXECUTION", "Creating the recipe blog post")
-        console.print(Panel(Markdown(task), title="Task Definition", border_style="cyan"))
         
+        agent_statistics = defaultdict(lambda: defaultdict(int))
         while task.lower() != "exit":
             
-            start_time = time.time()
+            overall_start_time = time.time()
+            internal_agents_start_time = time.time()
             try:                    
                 async for message in team.run_stream(task=task):
-                    await process_message(message)
+                    
+                    # if we hit the Task Result, just print the termination message and let the user communicate next                    
+                    if type(message).__name__ == 'TaskResult':
+                        print_section("TERMINATION", f"The task has been terminated, reason: {message.stop_reason}")
+                    else:
+                        
+                        if hasattr(message, 'source'):
+                            
+                            internal_agents_end_time = time.time()
+                            internal_elapsed_time = (internal_agents_end_time - internal_agents_start_time)/60
+                            output_message = f"[bold]Agent Name: [blue]{message.source}[/blue] execution time:[/bold] {internal_elapsed_time:.2f} minutes"
+
+                            # if we have model usage stats, collect them
+                            if hasattr(message, 'models_usage') and not message.models_usage == None:
+                                agent_statistics[message.source]['prompt_tokens'] += message.models_usage.prompt_tokens
+                                agent_statistics[message.source]['completion_tokens'] += message.models_usage.completion_tokens
+                                output_message += f"Prompt Tokens: {message.models_usage.prompt_tokens} - Completion Tokens: {message.models_usage.completion_tokens}"
+                                
+                            agent_statistics[message.source]['time_spent_minutes'] += internal_elapsed_time                            
+                            console.print(output_message)
+                        
+                        await process_message(message, message.source)
+                        
+                        # start the internal agent timer over
+                        internal_agents_start_time = time.time()
             except Exception as e:
                 console.print(f"[bold red]Error in message processing:[/bold red] {str(e)}")
                 console.print_exception()
                 
             end_time = time.time()
-            elapsed_time = (end_time - start_time)/60
+            overall_elapsed_time = (end_time - overall_start_time)/60
             print("\n\n##########################################################################################\n\n")
-            console.print(f"[bold]Execution time:[/bold] {elapsed_time:.2f} seconds")
+            console.print(f"[bold]Total Execution time:[/bold] {overall_elapsed_time:.2f} minutes")
             
             # Print total token usage metrics
             #2025-02-27 - The GPT-4o model, priced at $2.50 per 1 million input tokens and $10.00 per 1 million output tokens.            
             token_cost_per_input = 2.50 / 1_000_000
             token_cost_per_output = 10.00 / 1_000_000
+
+            ### Token counts as reported by the agents -- likely this will be missing the "Selector" agent from the team chat
+            for source, counts in agent_statistics.items():
+                print(f"Source: {source}")
+                for key, value in counts.items():
+                    print(f"  {key}: {value}")
+                print("-" * 20) 
+                
+            ### overall totals counted by the LLM Client as validation
 
             output_tokens = model_client.actual_usage().completion_tokens
             input_tokens = model_client.actual_usage().prompt_tokens

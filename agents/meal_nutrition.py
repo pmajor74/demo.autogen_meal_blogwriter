@@ -99,7 +99,7 @@ def get_random_recipe(count: int) -> dict:
                     # Check strSource and strMealThumb
                     source:str = meal.get("strSource", "") or ""
                     thumb:str = meal.get("strMealThumb", "") or ""
-                    if source is not None and source.strip() and thumb is not None and thumb.strip():
+                    if source is not None and thumb is not None:
                         # Transform the meal into simplified format
                         simplified_meal = {
                             "idMeal": meal.get("idMeal", ""),
@@ -112,8 +112,8 @@ def get_random_recipe(count: int) -> dict:
                         }
                         # Combine ingredients and measures
                         for i in range(1, 21):
-                            ingredient = meal.get(f"strIngredient{i}", "").strip()
-                            measure = meal.get(f"strMeasure{i}", "").strip()
+                            ingredient = meal.get(f"strIngredient{i}", "")
+                            measure = meal.get(f"strMeasure{i}", "")
                             if ingredient:
                                 simplified_meal["ingredients"].append(f"{measure} {ingredient}")
                             else:

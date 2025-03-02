@@ -9,3 +9,4 @@ azure-core
 datetime
 requests
 rich
+bs4

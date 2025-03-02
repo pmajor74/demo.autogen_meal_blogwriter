@@ -12,12 +12,12 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Python: Streamlit Direct",
+            "name": "debug:autogen_agent_recipe_blog_builder.py",
             "type": "debugpy",
             "request": "launch",
-            "module": "streamlit",
-            "args": ["run", "${workspaceFolder}/streamlit_app.py"],
-            "justMyCode": false
-          },        
+            "program": "${workspaceFolder}\\autogen_agent_recipe_blog_builder.py",
+            "console": "integratedTerminal"
+        }
+                
     ]
 }
