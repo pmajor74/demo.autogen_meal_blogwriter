@@ -30,6 +30,8 @@ async def process_message(message, source:str):
                 source = message.source if hasattr(message, 'source') else "Unknown"
                 print_agent_message(source, message.content)
 
+        elif type(message).__name__ == 'MultiModalMessage' and hasattr(message, 'content'):
+            print_agent_multimodal_message(source, message.content)
         elif type(message).__name__ == 'ToolCallRequestEvent' and hasattr(message, 'content'):
             if isinstance(message.content, list):  
                 for call in message.content:
@@ -143,6 +145,48 @@ def print_agent_message(name, content):
     
     console.print(Panel(
         Markdown(formatted_content),
+        title=f"[bold green]Agent:[/bold green] {name}",
+        border_style="green"
+    ))
+    
+    
+def pretty_print_json_contained_within_text(text):
+    """Attempt to prettify JSON snippets within a larger text"""
+    
+    start = text.find('{')
+    end = text.rfind('}')
+
+    # If we can't find a matching '{' ... '}', just return as-is.
+    if start == -1 or end == -1 or start > end:
+        return text
+
+    # 3. Extract the substring that might be JSON
+    snippet = text[start:end+1]
+    
+    # need to get rid of the new lines to make it valid json for the next part
+    snippet = snippet.replace("\n", "")
+
+    # 4. Try to parse it as JSON
+    try:
+        parsed = json.loads(snippet)
+        # 5. On success, prettify it with indentation
+        pretty = json.dumps(parsed, indent=4)
+
+        # Replace the original snippet with our prettified JSON
+        text = text[:start] + pretty + text[end+1:]
+    except json.JSONDecodeError:
+        # If it doesn't parse as JSON, just leave the text alone
+        pass
+
+    return text    
+    
+def print_agent_multimodal_message(name, content):
+    """Format agent messages nicely"""
+    # typically content[0] will be the message and content[1] is the image
+        
+    formatted_content = pretty_print_json_contained_within_text(content[0])
+    console.print(Panel(
+        formatted_content,
         title=f"[bold green]Agent:[/bold green] {name}",
         border_style="green"
     ))
