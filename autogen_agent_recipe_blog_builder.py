@@ -117,25 +117,17 @@ async def main() -> None:
                     • Record the recipe title, source, image, and YouTube link (if available).
                     • Collect nutritional information for each ingredient using a nutrition API.
                     • Ensure all ingredients have their nutritional data fetched and saved, including:
-                    • Total fat (grams)
-                    • Saturated fat (grams)
-                    • Sodium (milligrams)
-                    • Potassium (milligrams)
-                    • Cholesterol (milligrams)
-                    • Total carbohydrates (grams)
-                    • Fiber (grams)
-                    • Sugar (grams)
-
+                        • Calories
+                        • Protein (grams)
+                        • Total fat (grams)            
+                        • Carbohydrates (grams)
+  
                     • Calculate the total nutritional summary for the entire recipe by aggregating the data for all its ingredients. Include in the summary:
-                    • Total fat (grams)
-                    • Saturated fat (grams)
-                    • Sodium (milligrams)
-                    • Potassium (milligrams)
-                    • Cholesterol (milligrams)
-                    • Total carbohydrates (grams)
-                    • Fiber (grams)
-                    • Sugar (grams)
-                Deliverable: A dictionary with the recipe's title, source, images, complete instructions, complete ingredients list, nutritional breakdown for all ingredients, and a calculated total nutritional summary for the recipe.
+                        • Calories
+                        • Protein (grams)
+                        • Total fat (grams)            
+                        • Carbohydrates (grams)
+                        Deliverable: A dictionary with the recipe's title, source, images, complete instructions, complete ingredients list, nutritional breakdown for all ingredients, and a calculated total nutritional summary for the recipe.
 
             Step 2: Validation Check
                 Before proceeding to create the HTML blog post:

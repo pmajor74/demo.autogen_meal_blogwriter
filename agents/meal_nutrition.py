@@ -136,11 +136,18 @@ def get_nutrition_info(query: str) -> dict:
         dict: A dictionary containing simplified nutrition data on success, e.g.:
         {
             "calories": 537.75,
-            "total_fat": 60.75,
+            "carbohydrates": 0.05,
             "protein": 0.64,
-            "carbohydrates": 0.05
+            "total_fat": 60.75
         }
-        or, on error:
+        or, for non-critical errors (e.g., no food found, no nutrient data):
+        {
+            "calories": 0.0,
+            "carbohydrates": 0.0,
+            "protein": 0.0,
+            "total_fat": 0.0
+        }
+        or, for critical errors (e.g., API key missing, network issues):
         {
             "error": "Detailed error message describing the issue"
         }
@@ -156,14 +163,22 @@ def get_nutrition_info(query: str) -> dict:
     load_dotenv('../.env')
     API_KEY = os.environ.get("USDA_FOOD_API_KEY")
 
+    # Default zeroed-out response for non-critical errors with fixed order
+    ZERO_NUTRITION = {
+        "calories": 0.0,
+        "carbohydrates": 0.0,
+        "protein": 0.0,
+        "total_fat": 0.0
+    }
+
     # Input validation
     if not query or not isinstance(query, str) or not query.strip():
-        return {"error": "Invalid or empty query parameter"}
+        return ZERO_NUTRITION
 
     if not API_KEY:
         return {"error": "USDA_FOOD_API_KEY not found in environment variables"}
 
-    # Nutrient IDs from USDA documentation (aligned with working code)
+    # Nutrient IDs from USDA documentation
     NUTRIENT_MAP = {
         "calories": 1008,  # Energy in kcal
         "total_fat": 1004,  # Total lipid (fat)
@@ -171,11 +186,11 @@ def get_nutrition_info(query: str) -> dict:
         "carbohydrates": 1005,  # Carbohydrate, by difference
     }
 
-    # Helper function to parse the input query (from working code)
+    # Helper function to parse the input query
     def parse_input(query: str):
         """Parse query into quantity, unit, and food name."""
         pattern = r"(\d+/\d+|\d*\.?\d+)\s*(\w+)?\s*(.*)"
-        match = re.match(pattern, query.strip())
+        match = re.match(pattern, query)
         if match:
             quantity_str, unit, food_name = match.groups()
             try:
@@ -185,18 +200,18 @@ def get_nutrition_info(query: str) -> dict:
             except Exception as e:
                 return None, None, None, f"Failed to parse quantity '{quantity_str}': {str(e)}"
             unit = unit.lower() if unit else "g"
-            food_name = food_name.strip()
+            food_name = food_name
             if not food_name:
                 return None, None, None, "No food name provided"
         else:
             quantity = 1.0
             unit = "g"
-            food_name = query.strip()
+            food_name = query
             if not food_name:
                 return None, None, None, "No valid food name extracted"
         return quantity, unit, food_name, None
 
-    # Helper function to convert quantity to grams (from working code)
+    # Helper function to convert quantity to grams
     def convert_to_grams(quantity, unit):
         """Convert quantity and unit to grams."""
         quantity = float(quantity)
@@ -215,29 +230,34 @@ def get_nutrition_info(query: str) -> dict:
         }
         return quantity * conversions.get(unit, 1)  # Default to 1 if unit unrecognized
 
-    # Helper function to extract simple nutrition data (aligned with working code)
+    # Helper function to extract simple nutrition data with fixed order
     def get_simple_nutrition(nutrition_list):
-        """Extract specified nutrients and scale them."""
-        simple_nutrition = {}
+        """Extract specified nutrients and scale them, returning in fixed order."""
+        # Temporary storage for nutrient values
+        temp_nutrition = {}
         for nutrient in nutrition_list:
             if 'nutrient' in nutrient:
                 nutrient_id = nutrient['nutrient']['id']
                 amount = float(nutrient.get('amount', 0))
                 for name, id in NUTRIENT_MAP.items():
                     if nutrient_id == id:
-                        simple_nutrition[name] = amount
-        # Add missing nutrients with 0.0
-        for name in NUTRIENT_MAP:
-            if name not in simple_nutrition:
-                simple_nutrition[name] = 0.0
+                        temp_nutrition[name] = amount
+
+        # Construct result with fixed order
+        simple_nutrition = {
+            "calories": temp_nutrition.get("calories", 0.0),
+            "carbohydrates": temp_nutrition.get("carbohydrates", 0.0),
+            "protein": temp_nutrition.get("protein", 0.0),
+            "total_fat": temp_nutrition.get("total_fat", 0.0)
+        }
         return simple_nutrition
 
-    # Main logic with error handling (from previous code, adjusted)
+    # Main logic with error handling
     try:
         # Parse input
         input_quantity, input_unit, food_name, parse_error = parse_input(query)
         if parse_error:
-            return {"error": parse_error}
+            return ZERO_NUTRITION  # Return zeros instead of error for non-critical issues
 
         # Search for food
         try:
@@ -253,7 +273,7 @@ def get_nutrition_info(query: str) -> dict:
             return {"error": f"Failed to decode search JSON for '{food_name}': {str(e)}"}
 
         if not search_results.get('foods'):
-            return {"error": f"No food items found for query '{food_name}'"}
+            return ZERO_NUTRITION  # Return zeros if no food is found
 
         food_id = search_results['foods'][0]['fdcId']
 
@@ -273,19 +293,19 @@ def get_nutrition_info(query: str) -> dict:
         # Convert quantity to grams
         total_grams = convert_to_grams(input_quantity, input_unit)
         if total_grams <= 0:
-            return {"error": f"Invalid total grams calculated ({total_grams}) for '{query}'"}
+            return ZERO_NUTRITION  # Return zeros for invalid grams
 
         # Scale nutrition to total_grams (USDA data is per 100g)
         nutrition_per_100g = food_details.get('foodNutrients', [])
         if not nutrition_per_100g:
-            return {"error": f"No nutrient data found for '{query}'"}
+            return ZERO_NUTRITION  # Return zeros if no nutrient data
 
         scale_factor = total_grams / 100
         for nutrient in nutrition_per_100g:
             if 'amount' in nutrient:
                 nutrient['amount'] = float(nutrient['amount']) * scale_factor
 
-        # Extract simple nutrition data
+        # Extract simple nutrition data with fixed order
         simple_nutrition = get_simple_nutrition(nutrition_per_100g)
         return simple_nutrition
 
