@@ -127,72 +127,167 @@ def get_random_recipe(count: int) -> dict:
 
 def get_nutrition_info(query: str) -> dict:
     """
-    Get nutrition information for the query specified.
-
+    Retrieves nutrition information for a given food query from the USDA FoodData Central API.
+    
     Args:
-        query (str): This is the recipe item for which the nutrition information is needed. Example query: "1 cup brisket"
-        
+        query (str): The food query (e.g., "75g Butter", "1kg Leek", "1 Egg").
+    
     Returns:
-        dict: A dictionary containing either the nutritional data
+        dict: A dictionary containing simplified nutrition data on success, e.g.:
+        {
+            "calories": 537.75,
+            "total_fat": 60.75,
+            "protein": 0.64,
+            "carbohydrates": 0.05
+        }
+        or, on error:
+        {
+            "error": "Detailed error message describing the issue"
+        }
     """
+    
     import requests
+    import os
+    import re
     import json
     from dotenv import load_dotenv
-    import os
-    
+
+    # Load environment variables
+    load_dotenv('../.env')
+    API_KEY = os.environ.get("USDA_FOOD_API_KEY")
+
     # Input validation
     if not query or not isinstance(query, str) or not query.strip():
-        return {
-            "success": False,
-            "error": "Invalid query parameter",
-            "data": [{
-                "name": "unknown",
-                "fat_total_g": 0,
-                "fat_saturated_g": 0,
-                "sodium_mg": 0,
-                "potassium_mg": 0,
-                "cholesterol_mg": 0,
-                "carbohydrates_total_g": 0,
-                "fiber_g": 0,
-                "sugar_g": 0
-            }]
-        }
-    
-    try:
-        load_dotenv('../.env')
-        api_key = os.getenv('API_NINJAS_API_KEY')
-        
-        if not api_key:
-            return {
-                "success": False,
-                "error": "API key not found",
-                "data": [{
-                    "name": query.split()[-1] if query.split() else "unknown",
-                    "fat_total_g": 0,
-                    "fat_saturated_g": 0,
-                    "sodium_mg": 0,
-                    "potassium_mg": 0,
-                    "cholesterol_mg": 0,
-                    "carbohydrates_total_g": 0,
-                    "fiber_g": 0,
-                    "sugar_g": 0
-                }]
-            }
-        
-        api_url = f'https://api.api-ninjas.com/v1/nutrition?query={query}'
-        
-        response = requests.get(
-            api_url, 
-            headers={'X-Api-Key': api_key}, 
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
+        return {"error": "Invalid or empty query parameter"}
+
+    if not API_KEY:
+        return {"error": "USDA_FOOD_API_KEY not found in environment variables"}
+
+    # Nutrient IDs from USDA documentation (aligned with working code)
+    NUTRIENT_MAP = {
+        "calories": 1008,  # Energy in kcal
+        "total_fat": 1004,  # Total lipid (fat)
+        "protein": 1003,    # Protein
+        "carbohydrates": 1005,  # Carbohydrate, by difference
+    }
+
+    # Helper function to parse the input query (from working code)
+    def parse_input(query: str):
+        """Parse query into quantity, unit, and food name."""
+        pattern = r"(\d+/\d+|\d*\.?\d+)\s*(\w+)?\s*(.*)"
+        match = re.match(pattern, query.strip())
+        if match:
+            quantity_str, unit, food_name = match.groups()
+            try:
+                quantity = eval(quantity_str) if '/' in quantity_str else float(quantity_str)
+                if quantity <= 0:
+                    return None, None, None, "Quantity must be positive"
+            except Exception as e:
+                return None, None, None, f"Failed to parse quantity '{quantity_str}': {str(e)}"
+            unit = unit.lower() if unit else "g"
+            food_name = food_name.strip()
+            if not food_name:
+                return None, None, None, "No food name provided"
         else:
-            data = None
-            
-        return data
-            
-    except Exception:
-        raise
+            quantity = 1.0
+            unit = "g"
+            food_name = query.strip()
+            if not food_name:
+                return None, None, None, "No valid food name extracted"
+        return quantity, unit, food_name, None
+
+    # Helper function to convert quantity to grams (from working code)
+    def convert_to_grams(quantity, unit):
+        """Convert quantity and unit to grams."""
+        quantity = float(quantity)
+        unit = unit.lower() if unit else "g"
+        conversions = {
+            "g": 1,
+            "kg": 1000,
+            "mg": 0.001,
+            "ml": 1,  # Approximation: 1ml ≈ 1g (adjust for density if needed)
+            "l": 1000,
+            "oz": 28.3495,
+            "lb": 453.592,
+            "tsp": 5,
+            "tbsp": 15,
+            "cup": 240
+        }
+        return quantity * conversions.get(unit, 1)  # Default to 1 if unit unrecognized
+
+    # Helper function to extract simple nutrition data (aligned with working code)
+    def get_simple_nutrition(nutrition_list):
+        """Extract specified nutrients and scale them."""
+        simple_nutrition = {}
+        for nutrient in nutrition_list:
+            if 'nutrient' in nutrient:
+                nutrient_id = nutrient['nutrient']['id']
+                amount = float(nutrient.get('amount', 0))
+                for name, id in NUTRIENT_MAP.items():
+                    if nutrient_id == id:
+                        simple_nutrition[name] = amount
+        # Add missing nutrients with 0.0
+        for name in NUTRIENT_MAP:
+            if name not in simple_nutrition:
+                simple_nutrition[name] = 0.0
+        return simple_nutrition
+
+    # Main logic with error handling (from previous code, adjusted)
+    try:
+        # Parse input
+        input_quantity, input_unit, food_name, parse_error = parse_input(query)
+        if parse_error:
+            return {"error": parse_error}
+
+        # Search for food
+        try:
+            response = requests.get(
+                f'https://api.nal.usda.gov/fdc/v1/foods/search?api_key={API_KEY}&pageSize=1&pageNumber=1&query={food_name}',
+                timeout=10
+            )
+            response.raise_for_status()
+            search_results = response.json()
+        except requests.exceptions.RequestException as e:
+            return {"error": f"API search request failed for '{food_name}': {str(e)}"}
+        except json.JSONDecodeError as e:
+            return {"error": f"Failed to decode search JSON for '{food_name}': {str(e)}"}
+
+        if not search_results.get('foods'):
+            return {"error": f"No food items found for query '{food_name}'"}
+
+        food_id = search_results['foods'][0]['fdcId']
+
+        # Get food details
+        try:
+            response = requests.get(
+                f'https://api.nal.usda.gov/fdc/v1/food/{food_id}?api_key={API_KEY}',
+                timeout=10
+            )
+            response.raise_for_status()
+            food_details = response.json()
+        except requests.exceptions.RequestException as e:
+            return {"error": f"API details request failed for food ID {food_id}: {str(e)}"}
+        except json.JSONDecodeError as e:
+            return {"error": f"Failed to decode details JSON for food ID {food_id}: {str(e)}"}
+
+        # Convert quantity to grams
+        total_grams = convert_to_grams(input_quantity, input_unit)
+        if total_grams <= 0:
+            return {"error": f"Invalid total grams calculated ({total_grams}) for '{query}'"}
+
+        # Scale nutrition to total_grams (USDA data is per 100g)
+        nutrition_per_100g = food_details.get('foodNutrients', [])
+        if not nutrition_per_100g:
+            return {"error": f"No nutrient data found for '{query}'"}
+
+        scale_factor = total_grams / 100
+        for nutrient in nutrition_per_100g:
+            if 'amount' in nutrient:
+                nutrient['amount'] = float(nutrient['amount']) * scale_factor
+
+        # Extract simple nutrition data
+        simple_nutrition = get_simple_nutrition(nutrition_per_100g)
+        return simple_nutrition
+
+    except Exception as e:
+        return {"error": f"Unexpected error in get_nutrition_info for '{query}': {str(e)}"}

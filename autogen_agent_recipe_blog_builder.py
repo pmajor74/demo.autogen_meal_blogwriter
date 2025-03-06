@@ -41,6 +41,8 @@ def setup_team(model_client, recipes_to_generate):
         work_dir=work_dir, 
         timeout=120
     )
+    
+    
     code_execution_tool = PythonCodeExecutionTool(local_command_line_code_executor)        
 
     # --------------------------------------------------------------------------------------------------------------------------------
@@ -212,7 +214,7 @@ async def main() -> None:
             except Exception as e:
                 console.print(f"[bold red]Error in message processing:[/bold red] {str(e)}")
                 console.print_exception()
-                
+                 
             end_time = time.time()
             overall_elapsed_time = (end_time - overall_start_time)/60
             print("\n\n##########################################################################################\n\n")
