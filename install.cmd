@@ -29,7 +29,7 @@ if exist "%dot_envPath%" (
 )
 
 @echo Activating Environment
-call %venvPath%\scripts\activate
+call "%venvPath%\scripts\activate"
 
 @echo Upgrading pip installer to latest
 python.exe -m pip install --upgrade pip

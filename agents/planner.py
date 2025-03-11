@@ -39,16 +39,16 @@ def create_planner_agent(recipes_to_generate, model_client):
     1. <agent> : <detailed task description>
 
     After all tasks are complete and verified, end with "TERMINATE".
-    
+
     **IMPORTANT**: Other than this prompt now and the moment you are ready for the whole conversation to end, 
     never mention "TERMINATE" to any other agent or in any of your output during planning. It is only to be used to terminate the entire conversation.
     """
-    
+
     planner_agent = AssistantAgent(
         name="PlanningAgent",
         description="An agent for planning tasks, this agent should be the first to engage when given a new task.",
         system_message=planner_agent_prompt,
         model_client=model_client,
-    )
+    ) 
     return planner_agent
     

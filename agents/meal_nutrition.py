@@ -3,59 +3,60 @@ from autogen_agentchat.agents import AssistantAgent
 def create_meal_nutrition_agent(recipes_to_generate, model_client):
     
     meal_nutrition_agent_prompt = f"""
-    You are a Meal and Nutrition Agent. Your role is to fetch meal recipes and nutritional information for ingredients, and compile the data as instructed.
+        You are a Meal and Nutrition Agent. Your role is to fetch meal recipes and nutritional information for ingredients, and compile the data as instructed.
 
-    TASK REQUIREMENTS:
-    - You MUST fetch EXACTLY {recipes_to_generate} recipes - no more, no less
-    - Each recipe MUST include the original ingredients with their measurements
-    - You MUST fetch nutritional information for each ingredient
-    - You MUST structure the data correctly for the software engineer to use
+        TASK REQUIREMENTS:
+        - You MUST fetch EXACTLY {recipes_to_generate} recipes - no more, no less
+        - Each recipe MUST include the original ingredients with their measurements
+        - You MUST fetch nutritional information for each ingredient
+        - You MUST structure the data correctly for the software engineer to use
+        - You will NOT use placeholder values
+        - If a value indicates it cannot be found or is missing, just set it to 0.0.
 
-    TOOL DESCRIPTIONS:
-    - get_random_recipe: Returns random meal recipes. Use get_random_recipe({recipes_to_generate}) to fetch EXACTLY {recipes_to_generate} recipes.
-    - get_nutrition_info: Returns nutritional information for ingredients.
+        TOOL DESCRIPTIONS:
+        - get_random_recipe: Returns random meal recipes. Use get_random_recipe({recipes_to_generate}) to fetch EXACTLY {recipes_to_generate} recipes.
+        - get_nutrition_info: Returns nutritional information for ingredients.
     """
 
     meal_nutrition_agent_prompt += """
-    EXACT DATA STRUCTURE REQUIRED:
-    {
-        "Recipe Name 1": {
-            "source": "URL",
-            "thumb": "image URL",
-            "instructions": "full instructions",
-            "ingredients": [
-                "1 cup flour",
-                "2 eggs",
-                "etc."
-            ],
-            "nutrition_data": {
-                "flour": {nutrition details},
-                "eggs": {nutrition details}
+        EXACT DATA STRUCTURE REQUIRED:
+        {
+            "Recipe Name 1": {
+                "source": "URL",
+                "thumb": "image URL",
+                "instructions": "full instructions",
+                "ingredients": [
+                    "1 cup flour",
+                    "2 eggs",
+                    "etc."
+                ],
+                "nutrition_data": {
+                    "flour": {nutrition details},
+                    "eggs": {nutrition details}
+                },
+                "total_nutrition": {calculated totals}
             },
-            "total_nutrition": {calculated totals}
-        },
-        "Recipe Name 2": { ... },
-        "Recipe Name 3": { ... }
-    }
+            "Recipe Name 2": { ... },
+            "Recipe Name 3": { ... }
+        }
     """
 
     meal_nutrition_agent_prompt += f"""
+        Step-by-step process:
+        1. Call get_random_recipe({recipes_to_generate}) to get EXACTLY {recipes_to_generate} recipes
+        2. For each recipe, extract the list of ingredients with their measurements
+        3. For each ingredient, call get_nutrition_info to get nutritional data
+        4. Calculate total nutrition values for each recipe
+        5. Structure ALL data according to the format above
+        6. Verify you have EXACTLY {recipes_to_generate} complete recipes before responding
+        7. Return the COMPLETE structured data for all {recipes_to_generate} recipes in a single message
 
-    Step-by-step process:
-    1. Call get_random_recipe({recipes_to_generate}) to get EXACTLY {recipes_to_generate} recipes
-    2. For each recipe, extract the list of ingredients with their measurements
-    3. For each ingredient, call get_nutrition_info to get nutritional data
-    4. Calculate total nutrition values for each recipe
-    5. Structure ALL data according to the format above
-    6. Verify you have EXACTLY {recipes_to_generate} complete recipes before responding
-    7. Return the COMPLETE structured data for all {recipes_to_generate} recipes in a single message
-
-    CRITICAL: ALWAYS return EXACTLY {recipes_to_generate} recipes with COMPLETE data.
+        CRITICAL: ALWAYS return EXACTLY {recipes_to_generate} recipes with COMPLETE data.
     """
         
     meal_nutrition_agent = AssistantAgent(
         name="meal_nutrition_agent",
-        description="Responsible for fetching meal recipes and nutrition information.",        
+        description="Responsible for fetching meal recipes and nutrition information. This contains the only source of truth for anything to do with meals, recipes or nutriton.",        
         system_message=meal_nutrition_agent_prompt,
         model_client=model_client,
         tools=[get_nutrition_info, get_random_recipe],
@@ -99,7 +100,7 @@ def get_random_recipe(count: int) -> dict:
                     # Check strSource and strMealThumb
                     source:str = meal.get("strSource", "") or ""
                     thumb:str = meal.get("strMealThumb", "") or ""
-                    if source is not None and thumb is not None:
+                    if source is not None and source.strip() and thumb is not None and thumb.strip():
                         # Transform the meal into simplified format
                         simplified_meal = {
                             "idMeal": meal.get("idMeal", ""),
@@ -112,8 +113,8 @@ def get_random_recipe(count: int) -> dict:
                         }
                         # Combine ingredients and measures
                         for i in range(1, 21):
-                            ingredient = meal.get(f"strIngredient{i}", "")
-                            measure = meal.get(f"strMeasure{i}", "")
+                            ingredient = meal.get(f"strIngredient{i}", "").strip()
+                            measure = meal.get(f"strMeasure{i}", "").strip()
                             if ingredient:
                                 simplified_meal["ingredients"].append(f"{measure} {ingredient}")
                             else:
@@ -157,6 +158,7 @@ def get_nutrition_info(query: str) -> dict:
     import os
     import re
     import json
+    import time
     from dotenv import load_dotenv
 
     # Load environment variables
@@ -186,29 +188,71 @@ def get_nutrition_info(query: str) -> dict:
         "carbohydrates": 1005,  # Carbohydrate, by difference
     }
 
+    # Helper function to make API requests with retry logic
+    def make_request_with_retry(url, max_retries=3, delay=1):
+        last_exception = None
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                return response
+            except requests.exceptions.HTTPError as e:
+                last_exception = e
+                if e.response.status_code not in [500, 502, 503, 504]:
+                    raise  # Non-retryable status codes raise immediately
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                last_exception = e
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+        raise last_exception  # Raise the last exception after all retries fail    
+
     # Helper function to parse the input query
     def parse_input(query: str):
-        """Parse query into quantity, unit, and food name."""
-        pattern = r"(\d+/\d+|\d*\.?\d+)\s*(\w+)?\s*(.*)"
-        match = re.match(pattern, query)
-        if match:
-            quantity_str, unit, food_name = match.groups()
-            try:
-                quantity = eval(quantity_str) if '/' in quantity_str else float(quantity_str)
-                if quantity <= 0:
-                    return None, None, None, "Quantity must be positive"
-            except Exception as e:
-                return None, None, None, f"Failed to parse quantity '{quantity_str}': {str(e)}"
-            unit = unit.lower() if unit else "g"
-            food_name = food_name
-            if not food_name:
-                return None, None, None, "No food name provided"
-        else:
+        """
+        Parse an ingredient input string into quantity, unit, and food name.
+        Handles cases like '50g/2oz sultanas' by taking the first measurement.
+        """
+        query = query.strip()
+        if not query:
+            return None, None, None, "Empty query"
+
+        # Find the last space to separate measurements from food name
+        last_space_idx = query.rfind(" ")
+        if last_space_idx == -1:
+            # No space: entire query is food name, default quantity and unit
+            food_name = query
             quantity = 1.0
             unit = "g"
-            food_name = query
-            if not food_name:
-                return None, None, None, "No valid food name extracted"
+        else:
+            # After last space is food name, before is measurements
+            food_name = query[last_space_idx + 1:].strip()
+            measurements_str = query[:last_space_idx].strip()
+            if not measurements_str:
+                quantity = 1.0
+                unit = "g"
+            else:
+                # Split measurements by "/" and take the first one
+                measurements = measurements_str.split("/")
+                first_measurement = measurements[0].strip()
+                # Parse the measurement for quantity and unit
+                pattern = r"(\d+/\d+|\d*\.?\d+)\s*(\w+)?"
+                match = re.match(pattern, first_measurement)
+                if match:
+                    quantity_str, unit = match.groups()
+                    try:
+                        # Handle fractions (e.g., "1/2") or decimals/integers
+                        quantity = eval(quantity_str) if "/" in quantity_str else float(quantity_str)
+                        if quantity <= 0:
+                            return None, None, None, "Quantity must be positive"
+                    except Exception as e:
+                        return None, None, None, f"Failed to parse quantity '{quantity_str}': {str(e)}"
+                    unit = unit.lower() if unit else "g"
+                else:
+                    return None, None, None, f"Failed to parse measurement '{first_measurement}'"
+
+        if not food_name:
+            return None, None, None, "No food name provided"
+
         return quantity, unit, food_name, None
 
     # Helper function to convert quantity to grams
@@ -261,11 +305,9 @@ def get_nutrition_info(query: str) -> dict:
 
         # Search for food
         try:
-            response = requests.get(
-                f'https://api.nal.usda.gov/fdc/v1/foods/search?api_key={API_KEY}&pageSize=1&pageNumber=1&query={food_name}',
-                timeout=10
+            response = make_request_with_retry(
+                f'https://api.nal.usda.gov/fdc/v1/foods/search?api_key={API_KEY}&pageSize=1&pageNumber=1&query={food_name}'
             )
-            response.raise_for_status()
             search_results = response.json()
         except requests.exceptions.RequestException as e:
             return {"error": f"API search request failed for '{food_name}': {str(e)}"}
@@ -279,11 +321,9 @@ def get_nutrition_info(query: str) -> dict:
 
         # Get food details
         try:
-            response = requests.get(
-                f'https://api.nal.usda.gov/fdc/v1/food/{food_id}?api_key={API_KEY}',
-                timeout=10
+            response = make_request_with_retry(
+                f'https://api.nal.usda.gov/fdc/v1/food/{food_id}?api_key={API_KEY}'
             )
-            response.raise_for_status()
             food_details = response.json()
         except requests.exceptions.RequestException as e:
             return {"error": f"API details request failed for food ID {food_id}: {str(e)}"}
